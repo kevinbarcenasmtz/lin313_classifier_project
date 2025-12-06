@@ -80,65 +80,128 @@ def plot_f1_comparison(metrics_by_config: Dict[str, Dict], bert_baseline: float)
     return fig
 
 
-def plot_per_class_performance(metrics_by_config: Dict[str, Dict], bert_baselines: Dict) -> go.Figure:
+def plot_metrics_radar(metrics: Dict, bert_baseline: Dict, config_name: str = "Current Config") -> go.Figure:
     """
-    Grouped bar chart: Per-class F1 scores.
+    Radar chart: Compare overall metrics between config and BERT baseline.
     
     Args:
-        metrics_by_config: Dict with config names as keys, metrics dicts as values
-        bert_baselines: Dict with per-class BERT baseline F1 scores
+        metrics: Single metrics dict
+        bert_baseline: BERT baseline metrics dict
+        config_name: Name of the current configuration
         
     Returns:
         plotly.graph_objects.Figure
     """
-    config_order = ['5_shot', '10_shot', '15_shot', '20_shot']
-    config_labels = ['5-shot', '10-shot', '15-shot', '20-shot']
+    categories = ['Accuracy', 'Precision\n(Macro)', 'Recall\n(Macro)', 'F1\n(Macro)', 'F1\n(Micro)']
+    
+    config_values = [
+        metrics.get('accuracy', 0) * 100,
+        metrics.get('precision_macro', 0) * 100,
+        metrics.get('recall_macro', 0) * 100,
+        metrics.get('f1_macro', 0) * 100,
+        metrics.get('f1_micro', 0) * 100
+    ]
+    
+    bert_values = [
+        bert_baseline.get('accuracy', 0) * 100,
+        bert_baseline.get('precision_macro', 0) * 100,
+        bert_baseline.get('recall_macro', 0) * 100,
+        bert_baseline.get('f1_macro', 0) * 100,
+        0  # BERT doesn't have F1 micro
+    ]
     
     fig = go.Figure()
     
-    for config_idx, config in enumerate(config_order):
-        if config not in metrics_by_config:
-            continue
-            
-        per_class = metrics_by_config[config].get('per_class_metrics', {})
-        f1_scores = []
-        colors = []
-        
-        for label in CLASS_LABELS:
-            if label in per_class:
-                f1 = per_class[label].get('f1', 0) * 100
-                f1_scores.append(f1)
-                bert_f1 = bert_baselines.get(label, {}).get('f1', 0) * 100
-                colors.append('green' if f1 >= bert_f1 else 'red')
-            else:
-                f1_scores.append(0)
-                colors.append('gray')
-        
-        fig.add_trace(go.Bar(
-            name=config_labels[config_idx],
-            x=[CLASS_NAMES[i] for i in range(len(CLASS_LABELS))],
-            y=f1_scores,
-            marker_color=colors,
-            opacity=0.7
-        ))
+    fig.add_trace(go.Scatterpolar(
+        r=config_values + [config_values[0]],  # Close the polygon
+        theta=categories + [categories[0]],
+        fill='toself',
+        name=config_name,
+        line=dict(color='#1f77b4', width=3),
+        marker=dict(size=8)
+    ))
     
+    fig.add_trace(go.Scatterpolar(
+        r=bert_values + [bert_values[0]],  # Close the polygon
+        theta=categories + [categories[0]],
+        fill='toself',
+        name='BERT Baseline',
+        line=dict(color='#ff7f0e', width=3, dash='dash'),
+        marker=dict(size=8)
+    ))
+    
+    fig.update_layout(
+        polar=dict(
+            radialaxis=dict(
+                visible=True,
+                range=[0, 100],
+                tickmode='linear',
+                tick0=0,
+                dtick=20
+            )
+        ),
+        showlegend=True,
+        title=f"Metrics Comparison: {config_name} vs BERT Baseline",
+        height=500
+    )
+    
+    return fig
+
+
+def plot_per_class_performance(metrics: Dict, bert_baselines: Dict, config_name: str = "Current Config") -> go.Figure:
+    """
+    Bar chart: Per-class F1 scores for single config vs BERT baseline.
+    
+    Args:
+        metrics: Single metrics dict with per_class_metrics
+        bert_baselines: Dict with per-class BERT baseline F1 scores
+        config_name: Name of the current configuration
+        
+    Returns:
+        plotly.graph_objects.Figure
+    """
+    fig = go.Figure()
+    
+    per_class = metrics.get('per_class_metrics', {})
+    f1_scores = []
+    colors = []
+    
+    for label in CLASS_LABELS:
+        if label in per_class:
+            f1 = per_class[label].get('f1', 0) * 100
+            f1_scores.append(f1)
+            bert_f1 = bert_baselines.get(label, {}).get('f1', 0) * 100
+            colors.append('green' if f1 >= bert_f1 else 'red')
+        else:
+            f1_scores.append(0)
+            colors.append('gray')
+    
+    fig.add_trace(go.Bar(
+        name=config_name,
+        x=[CLASS_NAMES[i] for i in range(len(CLASS_LABELS))],
+        y=f1_scores,
+        marker_color=colors,
+        opacity=0.7
+    ))
+    
+    # Add BERT baseline lines
     for idx, label in enumerate(CLASS_LABELS):
         bert_f1 = bert_baselines.get(label, {}).get('f1', 0) * 100
         fig.add_hline(
             y=bert_f1,
-            line_dash="dot",
-            line_color="black",
-            line_width=1,
-            annotation_text=f"BERT {label}",
+            line_dash="dash",
+            line_color="red",
+            line_width=2,
+            annotation_text=f"BERT {label} ({bert_f1:.1f}%)",
             annotation_position="right",
-            annotation_font_size=8
+            annotation_font_size=9,
+            opacity=0.7
         )
     
     fig.update_layout(
-        title="Per-Class F1 Performance by Configuration",
+        title=f"Per-Class F1 Performance: {config_name} vs BERT Baseline",
         xaxis_title="Class",
         yaxis_title="F1-Score (%)",
-        barmode='group',
         legend=dict(yanchor="top", y=0.99, xanchor="left", x=0.01),
         height=500
     )
@@ -195,6 +258,23 @@ def plot_confusion_matrix_heatmap(conf_matrix: np.ndarray, class_name: str, conf
     Returns:
         plotly.graph_objects.Figure
     """
+    # Create annotations with larger, bolder text
+    annotations = []
+    for i in range(2):
+        for j in range(2):
+            annotations.append(
+                dict(
+                    x=j,
+                    y=i,
+                    text=str(int(conf_matrix[i, j])),
+                    showarrow=False,
+                    font=dict(size=24, color='white', family='Arial Black'),
+                    bgcolor='rgba(0,0,0,0.3)',
+                    bordercolor='white',
+                    borderwidth=2
+                )
+            )
+    
     fig = go.Figure(data=go.Heatmap(
         z=conf_matrix,
         x=['Predicted: Not ' + class_name, 'Predicted: ' + class_name],
@@ -202,14 +282,20 @@ def plot_confusion_matrix_heatmap(conf_matrix: np.ndarray, class_name: str, conf
         colorscale='Blues',
         text=conf_matrix.astype(int),
         texttemplate='%{text}',
-        textfont={"size": 14},
-        showscale=True
+        textfont={"size": 20, "color": "white"},
+        showscale=True,
+        hoverongaps=False
     ))
     
     fig.update_layout(
-        title=f"{class_name} - {config_name}",
-        height=300,
-        width=400
+        title=dict(
+            text=f"{class_name} - {config_name}",
+            font=dict(size=18)
+        ),
+        height=500,
+        width=600,
+        xaxis=dict(tickfont=dict(size=14)),
+        yaxis=dict(tickfont=dict(size=14))
     )
     
     return fig

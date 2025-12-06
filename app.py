@@ -19,7 +19,8 @@ from metrics import (
 )
 from visualizations import (
     create_metrics_table,
-    plot_all_confusion_matrices
+    plot_confusion_matrix_heatmap,
+    plot_metrics_radar
 )
 
 
@@ -61,7 +62,7 @@ def main():
             "Examples": [714, 72, 10, 79, 64],
         }
         class_df = pd.DataFrame(class_data)
-        st.dataframe(class_df, width='stretch', hide_index=True)
+        st.dataframe(class_df, use_container_width=True, hide_index=True)
 
         st.info(
             "The extreme class imbalance and cultural nuances of Mexican Spanish made this difficult for traditional supervised learning."
@@ -380,7 +381,7 @@ Answer: Gayphobia""",
         "F1-Score": ["73.96%", "TBD"]
     }
     comparison_df = pd.DataFrame(comparison_data)
-    st.dataframe(comparison_df, width='stretch', hide_index=True)
+    st.dataframe(comparison_df, use_container_width=True, hide_index=True)
     
     st.divider()
     
@@ -527,6 +528,14 @@ Answer: Gayphobia""",
                 if not can_run:
                     st.info("Please validate your API key and configure experiment settings before running.")
                 
+                # Reset button if experiment already completed
+                if 'experiment_results' in st.session_state and st.session_state.get('experiment_complete'):
+                    if st.button("🔄 Reset and Run New Experiment", type="secondary"):
+                        for key in ['experiment_results', 'experiment_complete', 'test_df', 'computed_metrics', 'computed_config']:
+                            if key in st.session_state:
+                                del st.session_state[key]
+                        st.rerun()
+                
                 run_button = st.button(
                     "Run Experiment",
                     type="primary",
@@ -605,7 +614,7 @@ Answer: Gayphobia""",
                                         if error_count <= 20:
                                             # Show all errors if 20 or fewer
                                             error_df = pd.DataFrame(metadata['errors'])
-                                            st.dataframe(error_df, width='stretch', hide_index=True)
+                                            st.dataframe(error_df, use_container_width=True, hide_index=True)
                                         else:
                                             # Show summary for many errors
                                             st.warning(f"Total errors: {error_count}")
@@ -620,7 +629,7 @@ Answer: Gayphobia""",
                                             
                                             st.markdown("**First 10 errors:**")
                                             error_df = pd.DataFrame(metadata['errors'][:10])
-                                            st.dataframe(error_df, width='stretch', hide_index=True)
+                                            st.dataframe(error_df, use_container_width=True, hide_index=True)
 
                         except Exception as e:
                             st.error(f"Experiment failed with error: {str(e)}")
@@ -661,7 +670,12 @@ Answer: Gayphobia""",
                 st.subheader("Metrics & Comparison")
                 
                 metrics_table = create_metrics_table(metrics, config_name, BERT_BASELINE)
-                st.dataframe(metrics_table, width='stretch', hide_index=True)
+                st.dataframe(metrics_table, use_container_width=True, hide_index=True)
+                
+                st.plotly_chart(
+                    plot_metrics_radar(metrics, BERT_BASELINE, config_name),
+                    use_container_width=True
+                )
                 
                 f1_macro = metrics.get('f1_macro', 0) * 100
                 bert_f1 = BERT_BASELINE['f1_macro'] * 100
@@ -683,10 +697,32 @@ Answer: Gayphobia""",
                 true_labels, pred_labels = extract_predictions_from_results(results)
                 conf_matrices = calculate_confusion_matrices(true_labels, pred_labels)
                 
-                st.plotly_chart(
-                    plot_all_confusion_matrices(conf_matrices, config_name),
-                    width='stretch'
+                # Dropdown selector for class
+                selected_class = st.selectbox(
+                    "Select class to view",
+                    CLASS_LABELS,
+                    format_func=lambda x: CLASS_NAMES[CLASS_LABELS.index(x)]
                 )
+                
+                st.plotly_chart(
+                    plot_confusion_matrix_heatmap(conf_matrices[selected_class], selected_class, config_name),
+                    use_container_width=True
+                )
+                
+                with st.expander("How to Read Multi-Label Confusion Matrices", expanded=False):
+                    st.markdown("""
+                    Since this is **multi-label classification**, we show **5 separate binary confusion matrices** 
+                    (one for each class: G, L, B, T, O).
+                    
+                    For each class:
+                    - **True Positives (TP)**: Model correctly identified the class
+                    - **False Positives (FP)**: Model incorrectly predicted the class
+                    - **True Negatives (TN)**: Model correctly identified absence of class
+                    - **False Negatives (FN)**: Model missed the class
+                    
+                    **High FP** = Model over-predicts this class  
+                    **High FN** = Model under-predicts this class
+                    """)
                 
                 cooccurrence = analyze_label_cooccurrence(true_labels, pred_labels)
                 st.markdown("### Label Co-occurrence Analysis")
@@ -702,6 +738,23 @@ Answer: Gayphobia""",
             
             with tab3:
                 st.subheader("Example Predictions")
+                
+                def classify_error_type(true_vec, pred_vec):
+                    """Classify the type of error in prediction."""
+                    if np.array_equal(true_vec, pred_vec):
+                        return "✅ Correct"
+                    
+                    true_sum = sum(true_vec)
+                    pred_sum = sum(pred_vec)
+                    
+                    if pred_sum == 0 and true_sum > 0:
+                        return "❌ Complete Miss (predicted None)"
+                    elif pred_sum < true_sum:
+                        return "⚠️ False Negative (missed labels)"
+                    elif pred_sum > true_sum:
+                        return "⚠️ False Positive (extra labels)"
+                    else:
+                        return "⚠️ Wrong Labels"
                 
                 filter_type = st.radio(
                     "Filter Examples",
@@ -742,12 +795,18 @@ Answer: Gayphobia""",
                 else:
                     display_count = min(5, len(filtered_results))
                     for i, result in enumerate(filtered_results[:display_count]):
+                        true_vec = result['true_labels']
+                        pred_vec = result['pred_labels']
+                        error_type = classify_error_type(true_vec, pred_vec)
+                        
                         with st.expander(f"Tweet {result['tweet_id']}: {result['true_labels_str']} → {result['pred_labels_str']}"):
+                            st.write(f"**Status**: {error_type}")
                             st.write(f"**Tweet Text**: {result['tweet_text']}")
                             st.write(f"**True Labels**: {result['true_labels_str']}")
                             st.write(f"**Predicted Labels**: {result['pred_labels_str']}")
                             if result.get('raw_response'):
-                                st.write(f"**Raw LLM Response**: {result['raw_response']}")
+                                with st.expander("View Raw LLM Response", expanded=False):
+                                    st.code(result['raw_response'], language=None)
             
             with tab4:
                 st.subheader("Minority Class Analysis")
@@ -774,7 +833,7 @@ Answer: Gayphobia""",
                 
                 if per_class_data:
                     per_class_df = pd.DataFrame(per_class_data)
-                    st.dataframe(per_class_df, width='stretch', hide_index=True)
+                    st.dataframe(per_class_df, use_container_width=True, hide_index=True)
                     
                     st.markdown("### Minority Class Focus: Biphobia, Lesbophobia, Transphobia")
                     
@@ -786,30 +845,81 @@ Answer: Gayphobia""",
                         class_row = [r for r in per_class_data if r['Class'] == class_name]
                         if class_row:
                             class_df = pd.DataFrame(class_row)
-                            st.dataframe(class_df, width='stretch', hide_index=True)
+                            st.dataframe(class_df, use_container_width=True, hide_index=True)
                             
                             class_examples = [r for r in results if r['true_labels'][CLASS_LABELS.index(label)] == 1]
                             
                             if class_examples:
-                                st.markdown(f"**All {class_name} examples in test set ({len(class_examples)}):**")
-                                for example in class_examples:
+                                total_examples = len(class_examples)
+                                display_limit = min(5, total_examples)
+                                st.markdown(f"**{class_name} examples in test set ({total_examples} total, showing {display_limit}):**")
+                                for example in class_examples[:display_limit]:
                                     with st.expander(f"Tweet {example['tweet_id']}: True={example['true_labels_str']}, Pred={example['pred_labels_str']}"):
                                         st.write(example['tweet_text'])
+                                if total_examples > display_limit:
+                                    st.caption(f"*Showing {display_limit} of {total_examples} examples. Use filters in 'Example Predictions' tab to see more.*")
             
             with tab5:
                 st.subheader("Cost Summary")
                 
                 metadata = experiment_results.get('metadata', {})
                 total_cost = metadata.get('total_cost', 0)
+                num_tweets = len(results)
+                total_api_calls = metadata.get('total_api_calls', 0)
+                total_input_tokens = metadata.get('total_input_tokens', 0)
+                total_output_tokens = metadata.get('total_output_tokens', 0)
+                errors = metadata.get('errors', [])
+                success_count = total_api_calls - len(errors)
                 
-                st.markdown("### Cost Summary")
-                col1, col2 = st.columns(2)
+                col1, col2, col3 = st.columns(3)
                 with col1:
                     st.metric("Total Cost", f"${total_cost:.4f}")
-                    st.metric("Total API Calls", metadata.get('total_api_calls', 0))
+                    st.metric("Cost per Tweet", f"${total_cost/num_tweets:.6f}" if num_tweets > 0 else "$0.00")
                 with col2:
-                    st.metric("Total Input Tokens", f"{metadata.get('total_input_tokens', 0):,}")
-                    st.metric("Total Output Tokens", f"{metadata.get('total_output_tokens', 0):,}")
+                    st.metric("Total API Calls", total_api_calls)
+                    st.metric("Avg Tokens per Call", 
+                             f"{(total_input_tokens + total_output_tokens) // max(total_api_calls, 1):,}" if total_api_calls > 0 else "0")
+                with col3:
+                    st.metric("Success Rate", 
+                             f"{(success_count / max(total_api_calls, 1) * 100):.1f}%" if total_api_calls > 0 else "0%")
+                    st.metric("Total Input Tokens", f"{total_input_tokens:,}")
+                
+                st.metric("Total Output Tokens", f"{total_output_tokens:,}")
+                
+                st.markdown("### Cost-Benefit Comparison")
+                comparison_data = {
+                    "Metric": ["Training Cost", "Inference Cost (test set)", "Setup Time", "Update Flexibility"],
+                    "Few-Shot (This Run)": [
+                        "$0",
+                        f"${total_cost:.2f}",
+                        "5 minutes",
+                        "Immediate"
+                    ],
+                    "BERT Fine-Tuning": [
+                        "$5-20 (GPU)",
+                        "$0 (self-hosted)",
+                        "2-4 hours",
+                        "Requires retraining"
+                    ]
+                }
+                st.dataframe(pd.DataFrame(comparison_data), use_container_width=True, hide_index=True)
+                
+                st.markdown("### Download Results")
+                results_df = pd.DataFrame(results)
+                # Select relevant columns for CSV
+                csv_columns = ['tweet_id', 'tweet_text', 'true_labels', 'pred_labels', 'true_labels_str', 'pred_labels_str']
+                if 'raw_response' in results_df.columns:
+                    csv_columns.append('raw_response')
+                
+                csv_df = results_df[csv_columns]
+                csv = csv_df.to_csv(index=False)
+                
+                st.download_button(
+                    label="Download Full Results CSV",
+                    data=csv,
+                    file_name=f"homo_mex_results_{config_name}.csv",
+                    mime="text/csv"
+                )
     
     st.divider()
     
@@ -877,7 +987,7 @@ Answer: Gayphobia""",
         }
         label_df = pd.DataFrame(label_data)
         label_df['Match'] = label_df['Count'] == label_df['Expected']
-        st.dataframe(label_df, width='stretch', hide_index=True)
+        st.dataframe(label_df, use_container_width=True, hide_index=True)
         
         if st.session_state.validation_results.get('warnings'):
             with st.expander("Validation Warnings", expanded=False):
