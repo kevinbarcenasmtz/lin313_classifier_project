@@ -245,7 +245,16 @@ def create_metrics_table(metrics: Dict, config_name: str, bert_baseline: Dict) -
     return pd.DataFrame(data)
 
 
-def plot_confusion_matrix_heatmap(conf_matrix: np.ndarray, class_name: str, config_name: str) -> go.Figure:
+def plot_confusion_matrix_heatmap(
+    conf_matrix: np.ndarray, 
+    class_name: str, 
+    config_name: str,
+    colorscale: str = 'Blues',
+    text_color: str = 'white',
+    annotation_text_color: str = 'white',
+    annotation_bg_color: str = 'rgba(0,0,0,0.3)',
+    annotation_border_color: str = 'white'
+) -> go.Figure:
     """
     Create heatmap for single class confusion matrix.
     
@@ -253,11 +262,15 @@ def plot_confusion_matrix_heatmap(conf_matrix: np.ndarray, class_name: str, conf
         conf_matrix: 2x2 confusion matrix
         class_name: Name of the class (e.g., 'G')
         config_name: Configuration name (e.g., '15-shot')
+        colorscale: Plotly colorscale name (default: 'Blues')
+        text_color: Color for heatmap text numbers (default: 'white')
+        annotation_text_color: Color for annotation text (default: 'white')
+        annotation_bg_color: Background color for annotations (default: 'rgba(0,0,0,0.3)')
+        annotation_border_color: Border color for annotations (default: 'white')
         
     Returns:
         plotly.graph_objects.Figure
     """
-    # Create annotations with larger, bolder text
     annotations = []
     for i in range(2):
         for j in range(2):
@@ -267,9 +280,9 @@ def plot_confusion_matrix_heatmap(conf_matrix: np.ndarray, class_name: str, conf
                     y=i,
                     text=str(int(conf_matrix[i, j])),
                     showarrow=False,
-                    font=dict(size=24, color='white', family='Arial Black'),
-                    bgcolor='rgba(0,0,0,0.3)',
-                    bordercolor='white',
+                    font=dict(size=24, color=annotation_text_color, family='Arial Black'),
+                    bgcolor=annotation_bg_color,
+                    bordercolor=annotation_border_color,
                     borderwidth=2
                 )
             )
@@ -278,10 +291,10 @@ def plot_confusion_matrix_heatmap(conf_matrix: np.ndarray, class_name: str, conf
         z=conf_matrix,
         x=['Predicted: Not ' + class_name, 'Predicted: ' + class_name],
         y=['Actual: Not ' + class_name, 'Actual: ' + class_name],
-        colorscale='Blues',
+        colorscale=colorscale,
         text=conf_matrix.astype(int),
         texttemplate='%{text}',
-        textfont={"size": 20, "color": "white"},
+        textfont={"size": 20, "color": text_color},
         showscale=True,
         hoverongaps=False
     ))

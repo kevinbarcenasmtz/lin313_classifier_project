@@ -955,8 +955,56 @@ Answer: Gayphobia""",
                     format_func=lambda x: CLASS_NAMES[CLASS_LABELS.index(x)]
                 )
                 
+                with st.expander("Color Scheme Settings", expanded=False):
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        colorscale = st.selectbox(
+                            "Color Scale",
+                            options=['Blues', 'Greens', 'Reds', 'Oranges', 'Purples', 'Viridis', 'Plasma', 'Inferno'],
+                            index=0,
+                            help="Color scheme for the heatmap background"
+                        )
+                        text_color = st.color_picker(
+                            "Text Color",
+                            value="#FFFFFF",
+                            help="Color for numbers displayed on the heatmap"
+                        )
+                    with col2:
+                        annotation_text_color = st.color_picker(
+                            "Annotation Text Color",
+                            value="#FFFFFF",
+                            help="Color for annotation text (if using annotations)"
+                        )
+                        annotation_bg_hex = st.color_picker(
+                            "Annotation Background",
+                            value="#000000",
+                            help="Background color for annotations"
+                        )
+                        annotation_bg_alpha = st.slider(
+                            "Annotation Background Opacity",
+                            min_value=0.0,
+                            max_value=1.0,
+                            value=0.3,
+                            step=0.1,
+                            help="Transparency of annotation background"
+                        )
+                
+                r = int(annotation_bg_hex[1:3], 16)
+                g = int(annotation_bg_hex[3:5], 16)
+                b = int(annotation_bg_hex[5:7], 16)
+                annotation_bg_rgba = f"rgba({r}, {g}, {b}, {annotation_bg_alpha})"
+                
                 st.plotly_chart(
-                    plot_confusion_matrix_heatmap(conf_matrices[selected_class], selected_class, config_name),
+                    plot_confusion_matrix_heatmap(
+                        conf_matrices[selected_class], 
+                        selected_class, 
+                        config_name,
+                        colorscale=colorscale,
+                        text_color=text_color,
+                        annotation_text_color=annotation_text_color,
+                        annotation_bg_color=annotation_bg_rgba,
+                        annotation_border_color=annotation_text_color
+                    ),
                     width='stretch'
                 )
                 
