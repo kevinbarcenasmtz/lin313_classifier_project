@@ -20,7 +20,8 @@ from metrics import (
 from visualizations import (
     create_metrics_table,
     plot_confusion_matrix_heatmap,
-    plot_metrics_radar
+    plot_metrics_radar,
+    plot_per_class_performance
 )
 
 
@@ -45,7 +46,7 @@ def main():
         st.markdown(
             """
         The original HOMO-MEX research identified **fine-grained LGBT+phobia classification** 
-        as particularly challenging. Their best BERT model achieved **74% F1-score** on 
+        as particularly challenging. Their best BERT model achieved **73.96% F1-score** on 
         multi-label classification across five categories.
         """
         )
@@ -62,14 +63,14 @@ def main():
             "Examples": [714, 72, 10, 79, 64],
         }
         class_df = pd.DataFrame(class_data)
-        st.dataframe(class_df, use_container_width=True, hide_index=True)
+        st.dataframe(class_df, width='stretch', hide_index=True)
 
         st.info(
             "The extreme class imbalance and cultural nuances of Mexican Spanish made this difficult for traditional supervised learning."
         )
 
     with col2:
-        st.metric("BERT F1-Score", "74%")
+        st.metric("BERT F1-Score", "73.96%")
         st.metric("Training Examples", "862")
         st.metric("Lowest Class", "10 (Biphobia)")
         st.metric("Classes", "5")
@@ -207,7 +208,7 @@ Answer: Gayphobia""",
             """
         - **LLM**: GPT-4-turbo (128K context window)
         - **Temperature**: 0.1 (for consistency)
-        - **Few-shot examples**: 15 total (2-3 per class)
+        - **Few-shot examples**: Approximately 15 total (2-3 per class)
         - **Prompt language**: English instructions, Spanish tweet content
         """
         )
@@ -216,10 +217,11 @@ Answer: Gayphobia""",
         st.markdown("**Dataset Split**")
         st.markdown(
             """
-        Using the exact train/test split from HOMO-MEX:
+        Note: The public HOMO-MEX data only includes the 862 training tweets. We create our own 
+        test set by splitting this data (35% test, 65% train) for evaluation:
         
-        - **Training pool**: 862 tweets → Select 15 for few-shot examples
-        - **Test set**: 477 tweets (unchanged for direct comparison)
+        - **Training pool**: ~560 tweets → Select 15 for few-shot examples
+        - **Test set**: ~302 tweets (created from available training data)
         """
         )
 
@@ -273,8 +275,8 @@ Answer: Gayphobia""",
             **Fine-Grained Classification Subset**
             
             - Labels: G, L, B, T, O (multi-label)
-            - Total: 1,339 tweets
-            - Train: 862 | Test: 477
+            - Total: 1,339 tweets (862 train + 477 test in original paper)
+            - Available data: 862 training tweets (test set not in public release)
             """
             )
 
@@ -363,7 +365,7 @@ Answer: Gayphobia""",
         st.markdown("**Success Criteria**")
         st.markdown(
             """
-        - Match or exceed 74% F1-score with 98% fewer training examples
+        - Match or exceed 73.96% F1-score with 98% fewer training examples
         - Improve F1 on minority classes (L/B/T) compared to BERT
         - Demonstrate cost-effectiveness of few-shot vs. fine-tuning
         """
@@ -381,7 +383,101 @@ Answer: Gayphobia""",
         "F1-Score": ["73.96%", "TBD"]
     }
     comparison_df = pd.DataFrame(comparison_data)
-    st.dataframe(comparison_df, use_container_width=True, hide_index=True)
+    st.dataframe(comparison_df, width='stretch', hide_index=True)
+    
+    st.divider()
+    
+    st.header("Data Loading & Few-Shot Pool Preparation")
+    
+    st.markdown(
+        """
+        Load the HOMO-MEX training dataset. The dataset will be split into train/test sets 
+        immediately, and a default 15-shot few-shot pool will be created for interactive predictions.
+        """
+    )
+    
+    if st.button("Load Dataset & Create Few-Shot Pools", type="primary"):
+        with st.spinner("Loading dataset, splitting train/test, and creating default few-shot pool..."):
+            try:
+                full_df = load_homo_mex_dataset()
+                full_df = prepare_label_vectors(full_df)
+                validation = validate_dataset(full_df)
+
+                # Split dataset immediately
+                train_df, test_df = split_train_test(full_df, test_size=0.35, random_seed=42)
+                
+                # Create default 15-shot pool
+                from few_shot import create_single_few_shot_pool
+                from classification import format_pool_examples
+                
+                default_pool = create_single_few_shot_pool(train_df, 15, random_seed=42)
+                few_shot_examples = format_pool_examples(default_pool)
+
+                st.session_state.full_df = full_df
+                st.session_state.train_df = train_df
+                st.session_state.test_df = test_df
+                st.session_state.label_counts = validation['stats']['label_counts']
+                st.session_state.validation_results = validation
+                st.session_state.default_few_shot_examples = few_shot_examples
+
+                st.success(f"Dataset loaded successfully! Split: {len(train_df)} training tweets, {len(test_df)} test tweets. Default 15-shot pool created.")
+                
+                # Show few-shot example preview
+                with st.expander("View Default Few-Shot Examples (15 total)", expanded=False):
+                    for idx, example in enumerate(few_shot_examples[:5]):
+                        st.markdown(f"**Example {idx+1}**: {example['labels']}")
+                        st.caption(example['text'][:150] + ("..." if len(example['text']) > 150 else ""))
+                    st.caption(f"*Showing 5 of {len(few_shot_examples)} examples*")
+                
+            except FileNotFoundError as e:
+                st.error(f"Error: {str(e)}")
+                st.info("Please ensure the Excel file is located at: `data/Annotated LGBTQ+ Phobia Tweets.xlsx`")
+            except Exception as e:
+                st.error(f"Error: {str(e)}")
+                st.exception(e)
+    
+    if 'full_df' in st.session_state or 'train_df' in st.session_state:
+        if 'train_df' in st.session_state:
+            display_df = st.session_state.train_df
+        else:
+            display_df = st.session_state.full_df
+        st.markdown("### Dataset Statistics")
+        
+        col1, col2, col3, col4 = st.columns(4)
+        with col1:
+            st.metric("Total Tweets", len(display_df))
+        with col2:
+            st.metric("Multi-Label Examples", 
+                     st.session_state.validation_results['stats']['multi_label_count'])
+        with col3:
+            st.metric("Classes", 5)
+        with col4:
+            warnings = len(st.session_state.validation_results.get('warnings', []))
+            if warnings == 0:
+                st.metric("Validation", "Passed")
+            else:
+                st.metric("Validation", f"{warnings} warnings")
+        
+        if 'test_df' in st.session_state:
+            st.info(f"Dataset split: {len(st.session_state.train_df)} training tweets, {len(st.session_state.test_df)} test tweets")
+        else:
+            st.info("Dataset will be split into train/test sets when you run an experiment.")
+
+        st.markdown("**Label Distribution:**")
+        label_data = {
+            'Class': [CLASS_NAMES[i] for i in range(5)],
+            'Label': CLASS_LABELS,
+            'Count': [st.session_state.label_counts[label] for label in CLASS_LABELS],
+            'Expected': [714, 72, 10, 79, 64]
+        }
+        label_df = pd.DataFrame(label_data)
+        label_df['Match'] = label_df['Count'] == label_df['Expected']
+        st.dataframe(label_df, width='stretch', hide_index=True)
+        
+        if st.session_state.validation_results.get('warnings'):
+            with st.expander("Validation Warnings", expanded=False):
+                for warning in st.session_state.validation_results['warnings']:
+                    st.warning(warning)
     
     st.divider()
     
@@ -394,7 +490,7 @@ Answer: Gayphobia""",
             if 'api_key_valid' not in st.session_state:
                 st.session_state.api_key_valid = False
             if 'model_name' not in st.session_state:
-                st.session_state.model_name = "gpt-4.1-nano"
+                st.session_state.model_name = "gpt-4-turbo"
             if 'temperature' not in st.session_state:
                 st.session_state.temperature = 0.1
             if 'max_tokens' not in st.session_state:
@@ -440,11 +536,16 @@ Answer: Gayphobia""",
             if st.session_state.api_key:
                 st.markdown("### Model Configuration")
                 
-                model_options = ["gpt-4.1-nano"]
+                model_options = ["gpt-4-turbo", "gpt-4", "gpt-3.5-turbo", "gpt-4.1-nano"]
+                # Default to gpt-4-turbo if not set, otherwise keep current selection
+                default_index = 0
+                if 'model_name' in st.session_state and st.session_state.model_name in model_options:
+                    default_index = model_options.index(st.session_state.model_name)
+                
                 selected_model = st.selectbox(
                     "Model",
                     options=model_options,
-                    index=0,
+                    index=default_index,
                     help="Select the OpenAI model to use for classification"
                 )
                 st.session_state.model_name = selected_model
@@ -528,9 +629,8 @@ Answer: Gayphobia""",
                 if not can_run:
                     st.info("Please validate your API key and configure experiment settings before running.")
                 
-                # Reset button if experiment already completed
                 if 'experiment_results' in st.session_state and st.session_state.get('experiment_complete'):
-                    if st.button("🔄 Reset and Run New Experiment", type="secondary"):
+                    if st.button("Reset and Run New Experiment", type="secondary"):
                         for key in ['experiment_results', 'experiment_complete', 'test_df', 'computed_metrics', 'computed_config']:
                             if key in st.session_state:
                                 del st.session_state[key]
@@ -545,14 +645,9 @@ Answer: Gayphobia""",
                 
                 if run_button and can_run:
                     if 'test_df' not in st.session_state:
-                        with st.spinner("Splitting dataset into train/test sets..."):
-                            full_df = st.session_state.full_df.copy()
-                            train_df, test_df = split_train_test(full_df, test_size=0.35, random_seed=42)
-                            st.session_state.train_df = train_df
-                            st.session_state.test_df = test_df
-                            st.success(f"Dataset split complete: {len(train_df)} training, {len(test_df)} test.")
+                        st.error("Please load the dataset first using the 'Load Dataset & Create Few-Shot Pools' button above.")
+                        st.stop()
 
-                    # Create few-shot pool on-demand
                     n_examples = st.session_state.experiment_config.get('n_few_shot_examples', 15)
                     config_name = f"{n_examples}-shot"
                     
@@ -563,7 +658,6 @@ Answer: Gayphobia""",
                         pool = create_single_few_shot_pool(st.session_state.train_df, n_examples, random_seed=42)
                         few_shot_examples = format_pool_examples(pool)
                         
-                        # Verify no contamination
                         train_ids = set(st.session_state.train_df['id'].values)
                         test_ids = set(st.session_state.test_df['id'].values)
                         pool_ids = {ex['tweet_id'] for ex in pool['examples']}
@@ -612,11 +706,9 @@ Answer: Gayphobia""",
                                     error_count = len(metadata['errors'])
                                     with st.expander(f"View Errors ({error_count} total)", expanded=False):
                                         if error_count <= 20:
-                                            # Show all errors if 20 or fewer
                                             error_df = pd.DataFrame(metadata['errors'])
-                                            st.dataframe(error_df, use_container_width=True, hide_index=True)
+                                            st.dataframe(error_df, width='stretch', hide_index=True)
                                         else:
-                                            # Show summary for many errors
                                             st.warning(f"Total errors: {error_count}")
                                             error_types = {}
                                             for err in metadata['errors']:
@@ -629,11 +721,171 @@ Answer: Gayphobia""",
                                             
                                             st.markdown("**First 10 errors:**")
                                             error_df = pd.DataFrame(metadata['errors'][:10])
-                                            st.dataframe(error_df, use_container_width=True, hide_index=True)
+                                            st.dataframe(error_df, width='stretch', hide_index=True)
 
                         except Exception as e:
                             st.error(f"Experiment failed with error: {str(e)}")
                             st.exception(e)
+
+    st.divider()
+
+    # Make Predictions Section
+    if 'default_few_shot_examples' in st.session_state or 'experiment_results' in st.session_state:
+        st.header("Make Predictions on Custom Tweets")
+        
+        # Determine which few-shot examples to use
+        if 'experiment_results' in st.session_state:
+            # Use examples from completed experiment
+            few_shot_for_prediction = st.session_state.get('few_shot_examples_used')
+            if few_shot_for_prediction:
+                config_used = st.session_state.experiment_results.get('config', 'experiment')
+                st.info(f"Using few-shot examples from completed {config_used} experiment")
+            else:
+                few_shot_for_prediction = st.session_state.get('default_few_shot_examples')
+                st.info("Using default 15-shot examples (experiment examples not available)")
+        elif 'default_few_shot_examples' in st.session_state:
+            # Use default pool created at data load
+            few_shot_for_prediction = st.session_state.default_few_shot_examples
+            st.info("Using default 15-shot examples")
+        else:
+            few_shot_for_prediction = None
+        
+        if few_shot_for_prediction:
+            # Single tweet prediction
+            st.subheader("Single Tweet Classification")
+            
+            user_tweet = st.text_area(
+                "Enter a Mexican Spanish tweet to classify:",
+                placeholder="...",
+                height=100
+            )
+            
+            if st.button("Classify Tweet") and user_tweet:
+                if not st.session_state.get('api_key_valid'):
+                    st.error("Please validate your API key in the 'Run Experiments' section first")
+                else:
+                    with st.spinner("Classifying tweet..."):
+                        from classification import (
+                            build_classification_prompt,
+                            make_api_call_with_retry,
+                            parse_llm_response
+                        )
+                        import openai
+                        
+                        client = openai.OpenAI(api_key=st.session_state.api_key)
+                        messages = build_classification_prompt(few_shot_for_prediction, user_tweet)
+                        
+                        response_text, api_metadata = make_api_call_with_retry(
+                            client,
+                            messages,
+                            st.session_state.model_name,
+                            st.session_state.temperature,
+                            st.session_state.max_tokens
+                        )
+                        
+                        if api_metadata.get('success'):
+                            pred_vector, labels, is_valid = parse_llm_response(response_text)
+                            
+                            # Display results
+                            if labels == "None":
+                                st.success("**Not LGBT+phobic**")
+                            else:
+                                st.error(f"**LGBT+phobic**: {labels}")
+                            
+                            # Show details
+                            with st.expander("View Classification Details"):
+                                st.write(f"**Predicted Labels**: {labels}")
+                                st.write(f"**Label Vector**: {pred_vector}")
+                                st.write(f"**Raw LLM Response**: {response_text}")
+                                st.write(f"**Tokens Used**: {api_metadata.get('total_tokens', 'N/A')}")
+                                
+                                # Show the actual prompt
+                                st.markdown("**Full Prompt Sent:**")
+                                st.code(messages[1]['content'], language=None)
+                        else:
+                            st.error(f"Classification failed: {api_metadata.get('error', 'Unknown error')}")
+            
+            # Batch classification (optional)
+            st.markdown("---")
+            st.subheader("Batch Classification (Optional)")
+            st.warning("Note: Each tweet costs ~$0.001. Use sparingly.")
+            
+            manual_tweets = st.text_area(
+                "Enter multiple tweets (one per line):",
+                height=150,
+                placeholder="Tweet 1\nTweet 2\nTweet 3..."
+            )
+            
+            if st.button("Classify Batch") and manual_tweets:
+                tweets = [t.strip() for t in manual_tweets.strip().split('\n') if t.strip()]
+                
+                if not st.session_state.get('api_key_valid'):
+                    st.error("Please validate your API key first")
+                else:
+                    if len(tweets) > 50:
+                        st.warning(f"You entered {len(tweets)} tweets. Processing first 50 to avoid excessive costs.")
+                        tweets = tweets[:50]
+                    
+                    st.info(f"Processing {len(tweets)} tweets. Estimated cost: ~${len(tweets) * 0.001:.3f}")
+                    
+                    results = []
+                    progress_bar = st.progress(0)
+                    
+                    from classification import (
+                        build_classification_prompt,
+                        make_api_call_with_retry,
+                        parse_llm_response
+                    )
+                    import openai
+                    
+                    client = openai.OpenAI(api_key=st.session_state.api_key)
+                    
+                    for idx, tweet in enumerate(tweets):
+                        messages = build_classification_prompt(few_shot_for_prediction, tweet)
+                        response_text, api_metadata = make_api_call_with_retry(
+                            client,
+                            messages,
+                            st.session_state.model_name,
+                            st.session_state.temperature,
+                            st.session_state.max_tokens
+                        )
+                        
+                        if api_metadata.get('success'):
+                            pred_vector, labels, is_valid = parse_llm_response(response_text)
+                            results.append({
+                                'tweet': tweet,
+                                'labels': labels,
+                                'label_vector': pred_vector,
+                                'is_valid': is_valid
+                            })
+                        else:
+                            results.append({
+                                'tweet': tweet,
+                                'labels': 'Error',
+                                'label_vector': [0, 0, 0, 0, 0],
+                                'is_valid': False,
+                                'error': api_metadata.get('error', 'Unknown error')
+                            })
+                        
+                        progress_bar.progress((idx + 1) / len(tweets))
+                    
+                    # Display results
+                    st.success(f"Completed processing {len(tweets)} tweets")
+                    results_df = pd.DataFrame(results)
+                    st.dataframe(results_df, width='stretch', hide_index=True)
+                    
+                    # Download results
+                    csv = results_df.to_csv(index=False)
+                    st.download_button(
+                        label="Download Batch Results CSV",
+                        data=csv,
+                        file_name="batch_classification_results.csv",
+                        mime="text/csv"
+                    )
+        else:
+            st.warning("Few-shot examples not available. Please load the dataset first.")
+    else:
+        st.info("Load the dataset first to enable predictions.")
 
     st.divider()
 
@@ -670,11 +922,11 @@ Answer: Gayphobia""",
                 st.subheader("Metrics & Comparison")
                 
                 metrics_table = create_metrics_table(metrics, config_name, BERT_BASELINE)
-                st.dataframe(metrics_table, use_container_width=True, hide_index=True)
+                st.dataframe(metrics_table, width='stretch', hide_index=True)
                 
                 st.plotly_chart(
                     plot_metrics_radar(metrics, BERT_BASELINE, config_name),
-                    use_container_width=True
+                    width='stretch'
                 )
                 
                 f1_macro = metrics.get('f1_macro', 0) * 100
@@ -697,7 +949,6 @@ Answer: Gayphobia""",
                 true_labels, pred_labels = extract_predictions_from_results(results)
                 conf_matrices = calculate_confusion_matrices(true_labels, pred_labels)
                 
-                # Dropdown selector for class
                 selected_class = st.selectbox(
                     "Select class to view",
                     CLASS_LABELS,
@@ -706,7 +957,7 @@ Answer: Gayphobia""",
                 
                 st.plotly_chart(
                     plot_confusion_matrix_heatmap(conf_matrices[selected_class], selected_class, config_name),
-                    use_container_width=True
+                    width='stretch'
                 )
                 
                 with st.expander("How to Read Multi-Label Confusion Matrices", expanded=False):
@@ -740,21 +991,20 @@ Answer: Gayphobia""",
                 st.subheader("Example Predictions")
                 
                 def classify_error_type(true_vec, pred_vec):
-                    """Classify the type of error in prediction."""
                     if np.array_equal(true_vec, pred_vec):
-                        return "✅ Correct"
+                        return "Correct"
                     
                     true_sum = sum(true_vec)
                     pred_sum = sum(pred_vec)
                     
                     if pred_sum == 0 and true_sum > 0:
-                        return "❌ Complete Miss (predicted None)"
+                        return "Complete Miss (predicted None)"
                     elif pred_sum < true_sum:
-                        return "⚠️ False Negative (missed labels)"
+                        return "False Negative (missed labels)"
                     elif pred_sum > true_sum:
-                        return "⚠️ False Positive (extra labels)"
+                        return "False Positive (extra labels)"
                     else:
-                        return "⚠️ Wrong Labels"
+                        return "Wrong Labels"
                 
                 filter_type = st.radio(
                     "Filter Examples",
@@ -833,7 +1083,13 @@ Answer: Gayphobia""",
                 
                 if per_class_data:
                     per_class_df = pd.DataFrame(per_class_data)
-                    st.dataframe(per_class_df, use_container_width=True, hide_index=True)
+                    st.dataframe(per_class_df, width='stretch', hide_index=True)
+                    
+                    st.markdown("### Visual Comparison")
+                    st.plotly_chart(
+                        plot_per_class_performance(metrics, BERT_BASELINE['per_class'], config_name),
+                        width='stretch'
+                    )
                     
                     st.markdown("### Minority Class Focus: Biphobia, Lesbophobia, Transphobia")
                     
@@ -845,7 +1101,7 @@ Answer: Gayphobia""",
                         class_row = [r for r in per_class_data if r['Class'] == class_name]
                         if class_row:
                             class_df = pd.DataFrame(class_row)
-                            st.dataframe(class_df, use_container_width=True, hide_index=True)
+                            st.dataframe(class_df, width='stretch', hide_index=True)
                             
                             class_examples = [r for r in results if r['true_labels'][CLASS_LABELS.index(label)] == 1]
                             
@@ -902,11 +1158,10 @@ Answer: Gayphobia""",
                         "Requires retraining"
                     ]
                 }
-                st.dataframe(pd.DataFrame(comparison_data), use_container_width=True, hide_index=True)
+                st.dataframe(pd.DataFrame(comparison_data), width='stretch', hide_index=True)
                 
                 st.markdown("### Download Results")
                 results_df = pd.DataFrame(results)
-                # Select relevant columns for CSV
                 csv_columns = ['tweet_id', 'tweet_text', 'true_labels', 'pred_labels', 'true_labels_str', 'pred_labels_str']
                 if 'raw_response' in results_df.columns:
                     csv_columns.append('raw_response')
@@ -920,79 +1175,103 @@ Answer: Gayphobia""",
                     file_name=f"homo_mex_results_{config_name}.csv",
                     mime="text/csv"
                 )
-    
-    st.divider()
-    
-    st.header("Data Loading & Few-Shot Pool Preparation")
-    
-    st.markdown(
-        """
-        Load the HOMO-MEX training dataset. The dataset will be split into train/test sets 
-        when you run an experiment, and few-shot examples will be created on-demand based on your configuration.
-        """
-    )
-    
-    if st.button("Load Dataset & Create Few-Shot Pools", type="primary"):
-        with st.spinner("Loading dataset and creating few-shot pools..."):
-            try:
-                full_df = load_homo_mex_dataset()
-                full_df = prepare_label_vectors(full_df)
-                validation = validate_dataset(full_df)
-
-                st.session_state.full_df = full_df
-                st.session_state.label_counts = validation['stats']['label_counts']
-                st.session_state.validation_results = validation
-
-                st.success("Dataset loaded successfully! The dataset will be split into train/test when you run an experiment.")
                 
-            except FileNotFoundError as e:
-                st.error(f"Error: {str(e)}")
-                st.info("Please ensure the Excel file is located at: `data/Annotated LGBTQ+ Phobia Tweets.xlsx`")
-            except Exception as e:
-                st.error(f"Error: {str(e)}")
-    
-    if 'full_df' in st.session_state or 'train_df' in st.session_state:
-        if 'train_df' in st.session_state:
-            display_df = st.session_state.train_df
-        else:
-            display_df = st.session_state.full_df
-        st.markdown("### Dataset Statistics")
-        
-        col1, col2, col3, col4 = st.columns(4)
-        with col1:
-            st.metric("Total Tweets", len(display_df))
-        with col2:
-            st.metric("Multi-Label Examples", 
-                     st.session_state.validation_results['stats']['multi_label_count'])
-        with col3:
-            st.metric("Classes", 5)
-        with col4:
-            warnings = len(st.session_state.validation_results.get('warnings', []))
-            if warnings == 0:
-                st.metric("Validation", "Passed")
-            else:
-                st.metric("Validation", f"{warnings} warnings")
-        
-        if 'test_df' in st.session_state:
-            st.info(f"Dataset split: {len(st.session_state.train_df)} training tweets, {len(st.session_state.test_df)} test tweets")
-        else:
-            st.info("Dataset will be split into train/test sets when you run an experiment.")
-
-        st.markdown("**Label Distribution:**")
-        label_data = {
-            'Class': [CLASS_NAMES[i] for i in range(5)],
-            'Label': CLASS_LABELS,
-            'Count': [st.session_state.label_counts[label] for label in CLASS_LABELS],
-            'Expected': [714, 72, 10, 79, 64]
-        }
-        label_df = pd.DataFrame(label_data)
-        label_df['Match'] = label_df['Count'] == label_df['Expected']
-        st.dataframe(label_df, use_container_width=True, hide_index=True)
-        
-        if st.session_state.validation_results.get('warnings'):
-            with st.expander("Validation Warnings", expanded=False):
-                for warning in st.session_state.validation_results['warnings']:
-                    st.warning(warning)
+                if st.button("Export Analysis Data for Report"):
+                    import json
+                    from datetime import datetime
+                    
+                    true_labels, pred_labels = extract_predictions_from_results(results)
+                    conf_matrices = calculate_confusion_matrices(true_labels, pred_labels)
+                    cooccurrence = analyze_label_cooccurrence(true_labels, pred_labels)
+                    
+                    def classify_error_type(true_vec, pred_vec):
+                        if np.array_equal(true_vec, pred_vec):
+                            return "Correct"
+                        
+                        true_sum = sum(true_vec)
+                        pred_sum = sum(pred_vec)
+                        
+                        if pred_sum == 0 and true_sum > 0:
+                            return "Complete Miss (predicted None)"
+                        elif pred_sum < true_sum:
+                            return "False Negative (missed labels)"
+                        elif pred_sum > true_sum:
+                            return "False Positive (extra labels)"
+                        else:
+                            return "Wrong Labels"
+                    
+                    analysis_data = {
+                        'experiment_config': {
+                            'config_name': config_name,
+                            'model': metadata.get('model'),
+                            'temperature': metadata.get('temperature'),
+                            'max_tokens': metadata.get('max_tokens'),
+                            'test_set_size': metadata.get('test_set_size'),
+                            'few_shot_examples': st.session_state.experiment_config.get('n_few_shot_examples')
+                        },
+                        'overall_metrics': {
+                            'accuracy': metrics.get('accuracy'),
+                            'precision_macro': metrics.get('precision_macro'),
+                            'precision_micro': metrics.get('precision_micro'),
+                            'recall_macro': metrics.get('recall_macro'),
+                            'recall_micro': metrics.get('recall_micro'),
+                            'f1_macro': metrics.get('f1_macro'),
+                            'f1_micro': metrics.get('f1_micro')
+                        },
+                        'bert_baseline': BERT_BASELINE,
+                        'per_class_metrics': metrics.get('per_class_metrics', {}),
+                        'confusion_matrices': {
+                            label: conf_matrices[label].tolist() 
+                            for label in CLASS_LABELS
+                        },
+                        'label_cooccurrence': cooccurrence,
+                        'cost_data': {
+                            'total_cost': total_cost,
+                            'cost_per_tweet': total_cost / num_tweets if num_tweets > 0 else 0,
+                            'total_api_calls': total_api_calls,
+                            'success_rate': (success_count / max(total_api_calls, 1) * 100) if total_api_calls > 0 else 0,
+                            'total_input_tokens': total_input_tokens,
+                            'total_output_tokens': total_output_tokens
+                        },
+                        'example_predictions': {
+                            'correct': [],
+                            'incorrect': [],
+                            'challenging': []
+                        },
+                        'export_timestamp': datetime.now().isoformat()
+                    }
+                    
+                    for result in results[:10]:
+                        if result.get('is_valid') and np.array_equal(result['true_labels'], result['pred_labels']):
+                            analysis_data['example_predictions']['correct'].append({
+                                'tweet_id': result['tweet_id'],
+                                'tweet_text': result['tweet_text'],
+                                'labels': result['true_labels_str']
+                            })
+                            if len(analysis_data['example_predictions']['correct']) >= 5:
+                                break
+                    
+                    for result in results:
+                        if result.get('is_valid') and not np.array_equal(result['true_labels'], result['pred_labels']):
+                            error_type = classify_error_type(result['true_labels'], result['pred_labels'])
+                            analysis_data['example_predictions']['incorrect'].append({
+                                'tweet_id': result['tweet_id'],
+                                'tweet_text': result['tweet_text'],
+                                'true_labels': result['true_labels_str'],
+                                'pred_labels': result['pred_labels_str'],
+                                'error_type': error_type
+                            })
+                            if len(analysis_data['example_predictions']['incorrect']) >= 5:
+                                break
+                    
+                    json_str = json.dumps(analysis_data, indent=2, ensure_ascii=False)
+                    
+                    st.download_button(
+                        label="Download Analysis JSON",
+                        data=json_str,
+                        file_name=f"analysis_data_{config_name}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
+                        mime="application/json"
+                    )
 
 
 if __name__ == "__main__":

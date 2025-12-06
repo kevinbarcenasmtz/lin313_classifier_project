@@ -420,7 +420,7 @@ def main():
                 
                 st.info(f"Found {len(texts)} texts. Estimated cost: ~${len(texts) * 0.001:.3f}")
                 
-                if st.button("🔍 Classify Batch (Text File)"):
+                if st.button("Classify Batch (Text File)"):
                     process_batch_llm(texts)
         
         elif upload_method == "CSV File":

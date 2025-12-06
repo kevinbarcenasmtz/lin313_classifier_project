@@ -1,7 +1,6 @@
 import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
-from plotly.subplots import make_subplots
 from typing import Dict
 from constants import CLASS_LABELS, CLASS_NAMES
 from metrics import BERT_BASELINE
@@ -296,51 +295,6 @@ def plot_confusion_matrix_heatmap(conf_matrix: np.ndarray, class_name: str, conf
         width=600,
         xaxis=dict(tickfont=dict(size=14)),
         yaxis=dict(tickfont=dict(size=14))
-    )
-    
-    return fig
-
-
-def plot_all_confusion_matrices(conf_matrices: Dict[str, np.ndarray], config_name: str) -> go.Figure:
-    """
-    Create subplot with 5 heatmaps side-by-side (one per class).
-    
-    Args:
-        conf_matrices: Dict with class labels as keys, confusion matrices as values
-        config_name: Configuration name (e.g., '15-shot')
-        
-    Returns:
-        plotly.graph_objects.Figure
-    """
-    fig = make_subplots(
-        rows=1,
-        cols=5,
-        subplot_titles=[CLASS_NAMES[i] for i in range(len(CLASS_LABELS))],
-        horizontal_spacing=0.1
-    )
-    
-    for idx, label in enumerate(CLASS_LABELS):
-        conf_matrix = conf_matrices[label]
-        
-        fig.add_trace(
-            go.Heatmap(
-                z=conf_matrix,
-                x=['Pred: ¬' + label, 'Pred: ' + label],
-                y=['Act: ¬' + label, 'Act: ' + label],
-                colorscale='Blues',
-                text=conf_matrix.astype(int),
-                texttemplate='%{text}',
-                textfont={"size": 12},
-                showscale=(idx == 0)
-            ),
-            row=1,
-            col=idx + 1
-        )
-    
-    fig.update_layout(
-        title=f"Confusion Matrices for {config_name}",
-        height=400,
-        width=2000
     )
     
     return fig

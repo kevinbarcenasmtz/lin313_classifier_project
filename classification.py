@@ -18,8 +18,6 @@ def split_train_test(df: pd.DataFrame, test_size: float = 0.35, random_seed: int
     # Count occurrences of each stratify_key
     key_counts = df['stratify_key'].value_counts()
     
-    # Group rare combinations (those with < 2 examples) into a single group
-    # This ensures stratification can work
     rare_keys = key_counts[key_counts < 2].index
     if len(rare_keys) > 0:
         df.loc[df['stratify_key'].isin(rare_keys), 'stratify_key'] = 'rare_combination'
@@ -273,6 +271,9 @@ def run_classification_experiment(
         config_name: Configuration name (e.g., '15-shot')
         progress_container: Streamlit container for progress display
     """
+    # Store few-shot examples used in this experiment for later predictions
+    st.session_state.few_shot_examples_used = few_shot_examples
+    
     results = []
     client = openai.OpenAI(api_key=api_key)
     

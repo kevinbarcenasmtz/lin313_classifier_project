@@ -1,99 +1,129 @@
-# Red Flag vs Green Flag LLM Classifier
+# Multi-Label LGBT+Phobia Detection in Mexican Spanish
 
-A Streamlit web application for many-shot classification of text as "Red Flag" or "Green Flag" using Large Language Models (LLMs) with few-shot prompting, based on consensus-annotated data from two groups.
+A Streamlit web application for detecting LGBT+phobic content in Mexican Spanish tweets using few-shot learning with GPT-4, extending the HOMO-MEX corpus.
 
 ## Features
 
-- **LLM-Powered Classification**: Uses OpenAI GPT models (3.5-turbo, GPT-4) with few-shot prompting
-- **Few-Shot Learning**: Automatically creates balanced few-shot examples from training data
-- **Configurable Prompting**: Adjustable number of examples per class in the prompt
-- **Multiple Model Support**: Choose between different OpenAI models
-- **Interactive Web Interface**: User-friendly Streamlit app for real-time classification
-- **Batch Processing**: Support for multiple upload methods with cost estimation:
-  - Text files (one sentence per line)
-  - CSV files (with 'sentence' column) 
-  - Manual text input
-- **LLM Evaluation**: Performance testing on sample test set with API cost tracking
-- **Downloadable Results**: Export batch classification results as CSV
+- **Few-Shot Classification**: Uses 5-20 examples per class for multi-label classification
+- **Multi-Label Detection**: Classifies into Gayphobia, Lesbophobia, Biphobia, Transphobia, Other
+- **Interactive Testing**: Classify individual tweets or batches without running full experiments
+- **Comprehensive Analysis**: Confusion matrices, per-class metrics, example predictions, minority class analysis
+- **Cost Tracking**: Real-time API cost monitoring and cost per tweet calculations
+- **BERT Comparison**: Direct comparison to published baseline results from HOMO-MEX paper
+- **Stratified Sampling**: Ensures balanced few-shot examples across all classes
 
-## Setup
+## Quick Start
 
 1. **Install dependencies:**
    ```bash
    pip install -r requirements.txt
    ```
 
-2. **Get OpenAI API Key:**
-   - Sign up at https://platform.openai.com
-   - Create an API key in your dashboard
-   - Add credits to your account
+2. **Add dataset**: Place the HOMO-MEX fine-grained classification dataset at:
+   ```
+   data/Annotated LGBTQ+ Phobia Tweets.xlsx
+   ```
 
-3. **Run the app:**
+3. **Run app:**
    ```bash
    streamlit run app.py
    ```
 
-4. **Open your browser** to `http://localhost:8501`
+4. **Usage flow:**
+   - Load dataset → Enter API key → Run experiment (or test individual tweets)
+   - View results in comprehensive analysis tabs
 
-## Data
+## Data Requirements
 
-The app uses consensus data from two annotation groups:
-- `data/Consensus items : Group 1 - Red Flag vs Green Flag.json`
-- `data/Consensus items: Group 2 - Red Flag vs Green Flag.json`
+The app expects the HOMO-MEX fine-grained classification dataset:
 
-Each file contains JSON arrays with objects having:
-- `item_id`: Unique identifier
-- `sentence`: Text content
-- `gold_label`: Either "Red Flag" or "Green Flag"
+- **Format**: Excel file with columns: `id`, `tweet_text`, `G`, `L`, `B`, `T`, `O`
+- **Available data**: 862 training tweets (public release only includes training data)
+- **Test set**: Created by splitting available data (35% test, ~302 tweets; 65% train, ~560 tweets)
+- **5 multi-label classes**: 
+  - G: Gayphobia (714 examples)
+  - L: Lesbophobia (72 examples)
+  - B: Biphobia (10 examples - extreme minority class)
+  - T: Transphobia (79 examples)
+  - O: Other (64 examples)
 
-## Usage
+## Methodology
 
-1. **API Setup**: Enter your OpenAI API key in the sidebar and select a model
-2. **Prepare Few-Shot Examples**: Click "Prepare Few-Shot Examples" to create balanced training examples
-3. **Single Classification**: Enter text and click "Classify Text" for individual predictions
-4. **Batch Classification**: Upload files or enter multiple sentences (with cost estimates)
-5. **LLM Evaluation**: Test performance on a sample of the test set
+### Few-Shot Learning Approach
 
-## Model Details
+- **Single Multi-Label Prompt**: One API call per tweet captures all applicable labels simultaneously
+- **Stratified Sampling**: Ensures minimum 2-3 examples per class, even for rare classes like Biphobia
+- **English Instructions, Spanish Content**: Prompts use English for clarity, tweets remain in Mexican Spanish
+- **Temperature**: 0.1 for consistent predictions
 
-- **Algorithm**: Few-shot prompting with OpenAI GPT models
-- **Prompt Engineering**: Structured prompts with clear task definitions and balanced examples
-- **Few-Shot Examples**: Configurable number of examples per class (3-20)
-- **Temperature**: Low temperature (0.1) for consistent predictions
-- **Evaluation**: Accuracy, precision, recall, F1-score, and confusion matrix on test samples
+### Research Questions
+
+1. **Sample Efficiency**: Can 15 few-shot examples compete with 862-example BERT training?
+2. **Minority Class Performance**: Does few-shot learning handle low-resource classes (Biphobia, Lesbophobia) better than fine-tuning?
+3. **Cost-Benefit Tradeoff**: How do API costs compare to GPU training time and compute?
+4. **Cross-Class Generalization**: Can the model learn shared patterns across LGBT+phobia types?
+
+## Model Configuration
+
+- **Supported Models**: GPT-4-turbo, GPT-4, GPT-3.5-turbo, GPT-4.1-nano
+- **Few-Shot Examples**: Configurable (5-20 examples)
+- **Temperature**: 0.1 (recommended for consistency)
+- **Max Tokens**: 50 (sufficient for label names)
+
+## Evaluation Metrics
+
+- **Per-Class F1 Score**: Primary metric for each category (G/L/B/T/O)
+- **Macro-Average F1**: Overall performance across all classes
+- **Micro-Average F1**: Weighted by class frequency
+- **Confusion Matrices**: Per-class binary classification matrices
+- **Label Co-occurrence Analysis**: Multi-label prediction accuracy
+
+## Baseline Comparison
+
+The app compares results against published BERT baseline from Vásquez et al. (2023):
+
+- **BERT F1-Score**: 73.96% (macro-average)
+- **BERT Accuracy**: 78.15%
+- **BERT Precision**: 93.54%
+- **BERT Recall**: 78.15%
 
 ## Cost Considerations
 
-- **Single Classification**: ~$0.001 per text
-- **Batch Processing**: Cost scales linearly with number of texts
-- **Model Evaluation**: ~$0.05-0.20 for 50-item test sample
-- **Model Choice**: GPT-3.5-turbo is most cost-effective, GPT-4 is more accurate but expensive
+- **Single Classification**: ~$0.001 per tweet
+- **Test Set (~302 tweets)**: ~$0.30-$1.20 depending on model
+- **Model Choice**: 
+  - GPT-3.5-turbo: Most cost-effective
+  - GPT-4-turbo: Better accuracy, higher cost
+  - GPT-4.1-nano: Experimental, lower cost
 
-## Example Usage
+## Citation
 
-### Single Text Classification
+**Vásquez, J., Andersen, S. T., Bel-Enguix, G., Gómez-Adorno, H., & Ojeda-Trueba, S.-L.** (2023). 
+Experiments on the HOMO-MEX Corpus for LGBT+phobia Detection. 
+
+In *Proceedings of the 7th Workshop on Online Abuse and Harms (WOAH 2023)*, pages 200-210. 
+Association for Computational Linguistics.
+
+**Repository**: [HOMO-MEX on GitHub](https://github.com/juanmvsa/HOMO-MEX)
+
+**Paper**: [ACL Anthology](https://aclanthology.org/2023.woah-1.20.pdf)
+
+## Project Structure
+
 ```
-Input: "The rain had softened to a drizzle."
-Output: ✅ Green Flag (Confidence: 0.85)
+lin313_classifier_project/
+├── app.py                 # Main Streamlit application
+├── classification.py      # Classification pipeline and API calls
+├── few_shot.py           # Few-shot example pool creation
+├── data_loading.py       # Dataset loading and validation
+├── metrics.py            # Metrics calculation and BERT baselines
+├── visualizations.py     # Plotly visualizations
+├── api_utils.py          # API key validation and cost estimation
+├── constants.py          # Class names and labels
+└── data/
+    └── Annotated LGBTQ+ Phobia Tweets.xlsx
 ```
 
-### Few-Shot Prompt Structure
-```
-You are a text classifier that categorizes sentences as either "Red Flag" or "Green Flag".
+## License
 
-Red Flag: Concerning, negative, problematic, or potentially harmful content...
-Green Flag: Neutral, positive, educational, or harmless content...
-
-Examples:
-Text: "It had been left on Elara's doorstep in a small wooden box with no note."
-Classification: Red Flag
-
-Text: "Photosynthesis is crucial for life on Earth..."
-Classification: Green Flag
-
-Text: "[Your input text here]"
-Classification:
-```
-
-### Batch Classification
-Upload files with cost estimates shown before processing. Results include confidence scores and are downloadable as CSV.
+This project extends the HOMO-MEX corpus. Please refer to the original repository for dataset licensing information.

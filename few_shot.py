@@ -22,7 +22,6 @@ def create_single_few_shot_pool(df: pd.DataFrame, n_examples: int, random_seed: 
     random.seed(random_seed)
     np.random.seed(random_seed)
     
-    # Calculate examples per class to ensure all classes are represented
     examples_per_class = math.ceil(n_examples / 5)
     
     class_data = {}
