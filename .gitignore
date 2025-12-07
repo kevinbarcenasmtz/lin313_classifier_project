@@ -8,7 +8,7 @@ __pycache__/
 *.pywz
 *.pyzw
 *.pyzwz
-data/
+# data/
 results/
 logs/
 .DS_Store
