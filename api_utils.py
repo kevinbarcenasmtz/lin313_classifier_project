@@ -3,13 +3,45 @@ from typing import Tuple, Dict
 
 
 def get_model_pricing(model_name: str) -> Dict[str, float]:
+    """
+    Get pricing information for OpenAI models.
+    
+    Pricing is per 1M tokens (as of 2024). Prices may vary by region and time.
+    For most accurate pricing, refer to: https://openai.com/pricing
+    
+    Args:
+        model_name: Name of the OpenAI model (e.g., 'gpt-4-turbo', 'gpt-3.5-turbo')
+        
+    Returns:
+        Dict with 'input' and 'output' keys representing cost per 1M tokens
+        
+    Raises:
+        ValueError: If model_name is not supported
+    """
+    model_name_lower = model_name.lower()
+    
+    # Pricing per 1M tokens (as of 2024)
     pricing = {
+        'gpt-4-turbo': {'input': 10.00, 'output': 30.00},
+        'gpt-4': {'input': 30.00, 'output': 60.00},
+        'gpt-3.5-turbo': {'input': 0.50, 'output': 1.50},
         'gpt-4.1-nano': {'input': 0.15, 'output': 0.60}
     }
     
-    if 'gpt-4.1-nano' in model_name.lower():
+    # Match model name (case-insensitive, handle variations)
+    if 'gpt-4-turbo' in model_name_lower or model_name_lower == 'gpt-4-turbo':
+        return pricing['gpt-4-turbo']
+    elif 'gpt-4' in model_name_lower and 'turbo' not in model_name_lower and 'nano' not in model_name_lower:
+        return pricing['gpt-4']
+    elif 'gpt-3.5-turbo' in model_name_lower:
+        return pricing['gpt-3.5-turbo']
+    elif 'gpt-4.1-nano' in model_name_lower or 'nano' in model_name_lower:
         return pricing['gpt-4.1-nano']
-    return pricing['gpt-4.1-nano']
+    else:
+        # Default to gpt-4-turbo if unknown, but warn
+        import warnings
+        warnings.warn(f"Unknown model '{model_name}', defaulting to gpt-4-turbo pricing")
+        return pricing['gpt-4-turbo']
 
 
 def estimate_api_cost(
@@ -19,7 +51,21 @@ def estimate_api_cost(
     few_shot_examples: int,
     avg_tweet_length: int = 100,
     avg_output_tokens: int = 20
-) -> Dict:
+) -> Dict[str, float]:
+    """
+    Estimate API cost for running classification experiments.
+    
+    Args:
+        model_name: OpenAI model name
+        num_test_tweets: Number of test tweets to classify
+        num_ablations: Number of different configurations to run
+        few_shot_examples: Number of few-shot examples per prompt
+        avg_tweet_length: Average tweet length in tokens
+        avg_output_tokens: Average output tokens per response
+        
+    Returns:
+        Dict with cost breakdown including total_cost, input_cost, output_cost, etc.
+    """
     pricing = get_model_pricing(model_name)
     
     system_tokens = 50
@@ -52,6 +98,15 @@ def estimate_api_cost(
 
 
 def validate_api_key(api_key: str) -> Tuple[bool, str]:
+    """
+    Validate an OpenAI API key by checking format and making a test API call.
+    
+    Args:
+        api_key: The API key to validate
+        
+    Returns:
+        Tuple of (is_valid: bool, message: str)
+    """
     if not api_key:
         return False, "API key cannot be empty"
     
@@ -63,8 +118,9 @@ def validate_api_key(api_key: str) -> Tuple[bool, str]:
     
     try:
         client = openai.OpenAI(api_key=api_key)
+        # Use a lightweight model for validation to minimize cost
         response = client.chat.completions.create(
-            model="gpt-4.1-nano",
+            model="gpt-3.5-turbo",  # Use cheaper model for validation
             messages=[{"role": "user", "content": "test"}],
             max_tokens=5
         )

@@ -1,5 +1,5 @@
 import numpy as np
-from typing import List, Dict, Tuple
+from typing import List, Dict, Tuple, Any
 from sklearn.metrics import (
     multilabel_confusion_matrix,
     accuracy_score,
@@ -43,7 +43,10 @@ def extract_predictions_from_results(results: List[Dict]) -> Tuple[List[List[int
     return true_labels, pred_labels
 
 
-def calculate_per_class_metrics(true_labels: List[List[int]], pred_labels: List[List[int]]) -> Dict[str, Dict]:
+def calculate_per_class_metrics(
+    true_labels: List[List[int]],
+    pred_labels: List[List[int]]
+) -> Dict[str, Dict[str, float]]:
     """
     Calculate precision, recall, F1 for each class (G, L, B, T, O).
     
@@ -79,7 +82,10 @@ def calculate_per_class_metrics(true_labels: List[List[int]], pred_labels: List[
     return per_class_metrics
 
 
-def calculate_metrics(true_labels: List[List[int]], pred_labels: List[List[int]]) -> Dict:
+def calculate_metrics(
+    true_labels: List[List[int]],
+    pred_labels: List[List[int]]
+) -> Dict[str, float]:
     """
     Calculate per-class and overall metrics for multi-label classification.
     
@@ -152,7 +158,10 @@ def calculate_confusion_matrices(true_labels: List[List[int]], pred_labels: List
     return result
 
 
-def analyze_label_cooccurrence(true_labels: List[List[int]], pred_labels: List[List[int]]) -> Dict:
+def analyze_label_cooccurrence(
+    true_labels: List[List[int]],
+    pred_labels: List[List[int]]
+) -> Dict[str, int]:
     """
     Analyze which label combinations are confused.
     

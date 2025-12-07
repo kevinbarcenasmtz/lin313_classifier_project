@@ -1,8 +1,22 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
+import json
+from datetime import datetime
 
-from constants import CLASS_NAMES, CLASS_LABELS
+from constants import (
+    CLASS_NAMES,
+    CLASS_LABELS,
+    DEFAULT_TEST_SIZE,
+    DEFAULT_RANDOM_SEED,
+    DEFAULT_FEW_SHOT_EXAMPLES,
+    MIN_FEW_SHOT_EXAMPLES,
+    MAX_FEW_SHOT_EXAMPLES,
+    DEFAULT_TEMPERATURE,
+    DEFAULT_MAX_TOKENS,
+    SUPPORTED_MODELS,
+    DEFAULT_MODEL
+)
 from data_loading import load_homo_mex_dataset, prepare_label_vectors, validate_dataset
 from api_utils import get_model_pricing, estimate_api_cost, validate_api_key
 from classification import (
@@ -21,7 +35,21 @@ from visualizations import (
     create_metrics_table,
     plot_confusion_matrix_heatmap,
     plot_metrics_radar,
-    plot_per_class_performance
+    plot_per_class_performance,
+    plot_shot_count_comparison,
+    plot_per_class_trends,
+    plot_cost_vs_performance
+)
+from evaluation import (
+    run_shot_count_evaluation,
+    save_evaluation_results,
+    load_evaluation_results,
+    EvaluationResults
+)
+from constants import (
+    EVALUATION_SHOT_COUNTS,
+    DEFAULT_NUM_TRIALS,
+    EVALUATION_RANDOM_SEEDS
 )
 
 
@@ -128,7 +156,7 @@ semantic understanding rather than statistical patterns.
 
     st.header("Methodology")
 
-    method_cols = st.columns(3)
+    method_cols = st.columns(2)
 
     with method_cols[0]:
         st.markdown("**Single Multi-Label Prompt**")
@@ -149,52 +177,32 @@ Answer with all labels that apply
         )
         st.markdown(
             """
-        - One API call per tweet
-        - Captures label correlations
-        - Handles multi-label naturally
+        - **One API call per tweet**: Captures all applicable labels simultaneously
+        - **Label correlations**: Model learns relationships between phobia types
+        - **Natural multi-label**: Handles 0-5 labels per tweet without binary decomposition
         """
         )
 
     with method_cols[1]:
-        st.markdown("**Stratified Sampling**")
+        st.markdown("**Stratified Sampling Strategy**")
         st.markdown(
             """
-        - Minimum 2-3 examples per class
-        - Fill remaining with common classes
-        - Ensures balanced coverage
+        - **Minimum coverage**: 2-3 examples per class ensures all categories are represented
+        - **Balanced distribution**: Remaining slots filled with common classes (Gayphobia)
+        - **Minority class protection**: Biphobia limited to max 3 examples to preserve test set integrity
         """
         )
-        st.caption("Handles class imbalance (Biphobia: 10 examples)")
-
-    with method_cols[2]:
-        st.markdown("**Prompt Language**")
-        st.code(
-            """You are a classifier for LGBT+phobic 
-content in Mexican Spanish.
-
-Classify this tweet: "{spanish_tweet}"
-
-Labels: Gayphobia, Lesbophobia, 
-Biphobia, Transphobia, Other
-
-Answer with all that apply.""",
-            language="python",
+        st.caption("Handles extreme class imbalance (Biphobia: only 10 total examples)")
+        
+        st.markdown("**Few-Shot Learning Advantages**")
+        st.markdown(
+            """
+        - **Semantic understanding**: Leverages pre-trained knowledge rather than statistical patterns
+        - **Rapid deployment**: No expensive fine-tuning required
+        - **Interpretability**: Explicit examples provide transparency in decisions
+        - **Flexibility**: Easy to update examples without retraining
+        """
         )
-        with st.expander("Example", expanded=False):
-            st.code(
-                """You are a classifier for LGBT+phobic 
-content in Mexican Spanish.
-
-Classify this tweet: "Los maricones no deberían 
-tener los mismos derechos"
-
-Labels: Gayphobia, Lesbophobia, 
-Biphobia, Transphobia, Other
-
-Answer: Gayphobia""",
-                language="python",
-            )
-        st.caption("English instructions with Spanish tweet content")
 
     st.divider()
 
@@ -404,13 +412,13 @@ Answer: Gayphobia""",
                 validation = validate_dataset(full_df)
 
                 # Split dataset immediately
-                train_df, test_df = split_train_test(full_df, test_size=0.35, random_seed=42)
+                train_df, test_df = split_train_test(full_df, test_size=DEFAULT_TEST_SIZE, random_seed=DEFAULT_RANDOM_SEED)
                 
                 # Create default 15-shot pool
                 from few_shot import create_single_few_shot_pool
                 from classification import format_pool_examples
                 
-                default_pool = create_single_few_shot_pool(train_df, 15, random_seed=42)
+                default_pool = create_single_few_shot_pool(train_df, DEFAULT_FEW_SHOT_EXAMPLES, random_seed=DEFAULT_RANDOM_SEED)
                 few_shot_examples = format_pool_examples(default_pool)
 
                 st.session_state.full_df = full_df
@@ -481,7 +489,17 @@ Answer: Gayphobia""",
     
     st.divider()
     
-    with st.expander("Run Experiments", expanded=False):
+    # Preserve expander state across reruns - keep open if user has API key or has opened it
+    if 'experiments_expander_open' not in st.session_state:
+        st.session_state.experiments_expander_open = False
+    
+    # Keep expander open if user has entered API key or has previously opened it
+    should_expand = st.session_state.experiments_expander_open or bool(st.session_state.get('api_key'))
+    
+    with st.expander("Run Experiments", expanded=should_expand):
+        # Mark as opened once user interacts with it
+        st.session_state.experiments_expander_open = True
+        
         if 'full_df' not in st.session_state:
             st.warning("Please load the dataset first using the button below.")
         else:
@@ -490,11 +508,11 @@ Answer: Gayphobia""",
             if 'api_key_valid' not in st.session_state:
                 st.session_state.api_key_valid = False
             if 'model_name' not in st.session_state:
-                st.session_state.model_name = "gpt-4-turbo"
+                st.session_state.model_name = DEFAULT_MODEL
             if 'temperature' not in st.session_state:
-                st.session_state.temperature = 0.1
+                st.session_state.temperature = DEFAULT_TEMPERATURE
             if 'max_tokens' not in st.session_state:
-                st.session_state.max_tokens = 50
+                st.session_state.max_tokens = DEFAULT_MAX_TOKENS
             if 'experiment_config' not in st.session_state:
                 st.session_state.experiment_config = {}
             
@@ -536,7 +554,7 @@ Answer: Gayphobia""",
             if st.session_state.api_key:
                 st.markdown("### Model Configuration")
                 
-                model_options = ["gpt-4-turbo", "gpt-4", "gpt-3.5-turbo", "gpt-4.1-nano"]
+                model_options = SUPPORTED_MODELS
                 # Default to gpt-4-turbo if not set, otherwise keep current selection
                 default_index = 0
                 if 'model_name' in st.session_state and st.session_state.model_name in model_options:
@@ -578,11 +596,11 @@ Answer: Gayphobia""",
                 
                 n_few_shot_examples = st.slider(
                     "Few-Shot Examples",
-                    min_value=5,
-                    max_value=20,
-                    value=15,
+                    min_value=MIN_FEW_SHOT_EXAMPLES,
+                    max_value=MAX_FEW_SHOT_EXAMPLES,
+                    value=DEFAULT_FEW_SHOT_EXAMPLES,
                     step=1,
-                    help="Number of few-shot examples to include in the prompt (5-20 examples)"
+                    help=f"Number of few-shot examples to include in the prompt ({MIN_FEW_SHOT_EXAMPLES}-{MAX_FEW_SHOT_EXAMPLES} examples)"
                 )
                 
                 st.session_state.experiment_config = {
@@ -655,7 +673,7 @@ Answer: Gayphobia""",
                         from few_shot import create_single_few_shot_pool
                         from classification import format_pool_examples
                         
-                        pool = create_single_few_shot_pool(st.session_state.train_df, n_examples, random_seed=42)
+                        pool = create_single_few_shot_pool(st.session_state.train_df, n_examples, random_seed=DEFAULT_RANDOM_SEED)
                         few_shot_examples = format_pool_examples(pool)
                         
                         train_ids = set(st.session_state.train_df['id'].values)
@@ -955,6 +973,12 @@ Answer: Gayphobia""",
                     format_func=lambda x: CLASS_NAMES[CLASS_LABELS.index(x)]
                 )
                 
+                colorscale = 'Blues'
+                text_color = '#FFFFFF'
+                annotation_text_color = '#FFFFFF'
+                annotation_bg_hex = '#000000'
+                annotation_bg_alpha = 0.3
+                
                 with st.expander("Color Scheme Settings", expanded=False):
                     col1, col2 = st.columns(2)
                     with col1:
@@ -1225,12 +1249,23 @@ Answer: Gayphobia""",
                 )
                 
                 if st.button("Export Analysis Data for Report"):
-                    import json
-                    from datetime import datetime
+                    experiment_results = st.session_state.experiment_results
+                    results = experiment_results.get('results', [])
+                    config_name = experiment_results.get('config', 'Unknown')
+                    metadata = experiment_results.get('metadata', {})
                     
                     true_labels, pred_labels = extract_predictions_from_results(results)
                     conf_matrices = calculate_confusion_matrices(true_labels, pred_labels)
                     cooccurrence = analyze_label_cooccurrence(true_labels, pred_labels)
+                    
+                    # Compute metrics if not already computed
+                    if 'computed_metrics' not in st.session_state or st.session_state.get('computed_config') != config_name:
+                        metrics = calculate_metrics(true_labels, pred_labels)
+                        per_class = calculate_per_class_metrics(true_labels, pred_labels)
+                        metrics['per_class_metrics'] = per_class
+                        st.session_state.computed_metrics = metrics
+                        st.session_state.computed_config = config_name
+                    metrics = st.session_state.computed_metrics
                     
                     def classify_error_type(true_vec, pred_vec):
                         if np.array_equal(true_vec, pred_vec):
@@ -1247,6 +1282,13 @@ Answer: Gayphobia""",
                             return "False Positive (extra labels)"
                         else:
                             return "Wrong Labels"
+                    
+                    total_cost = metadata.get('total_cost', 0)
+                    num_tweets = len(results)
+                    total_api_calls = metadata.get('total_api_calls', 0)
+                    success_count = total_api_calls - len(metadata.get('errors', []))
+                    total_input_tokens = metadata.get('total_input_tokens', 0)
+                    total_output_tokens = metadata.get('total_output_tokens', 0)
                     
                     analysis_data = {
                         'experiment_config': {
@@ -1320,6 +1362,210 @@ Answer: Gayphobia""",
                         file_name=f"analysis_data_{config_name}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
                         mime="application/json"
                     )
+    
+    st.divider()
+    
+    # Systematic Shot Count Evaluation Section
+    if 'full_df' in st.session_state or 'train_df' in st.session_state:
+        st.header("Systematic Shot Count Evaluation")
+        
+        st.markdown(
+            """
+            Run systematic evaluation across multiple shot counts with multiple trials per configuration.
+            This generates the comparison table required for the assignment.
+            """
+        )
+        
+        # Preserve expander state across reruns
+        if 'evaluation_expander_open' not in st.session_state:
+            st.session_state.evaluation_expander_open = False
+        
+        # Keep expander open if user has previously opened it
+        should_expand_eval = st.session_state.evaluation_expander_open
+        
+        with st.expander("Systematic Evaluation Configuration", expanded=should_expand_eval):
+            # Mark as opened once user interacts with it
+            st.session_state.evaluation_expander_open = True
+            
+            if 'full_df' not in st.session_state:
+                st.warning("Please load the dataset first using the 'Load Dataset & Create Few-Shot Pools' button above.")
+            else:
+                if 'api_key' not in st.session_state or not st.session_state.get('api_key_valid'):
+                    st.warning("Please validate your API key in the 'Run Experiments' section first.")
+                else:
+                    st.markdown("### Evaluation Settings")
+                    
+                    shot_counts = st.multiselect(
+                        "Shot Counts to Evaluate",
+                        options=[1, 5, 10, 15, 20],
+                        default=EVALUATION_SHOT_COUNTS,
+                        help="Select which shot counts to evaluate"
+                    )
+                    
+                    num_trials = st.number_input(
+                        "Number of Trials per Configuration",
+                        min_value=1,
+                        max_value=5,
+                        value=DEFAULT_NUM_TRIALS,
+                        help="Number of independent runs per shot count"
+                    )
+                    
+                    # Generate random seeds
+                    if num_trials > len(EVALUATION_RANDOM_SEEDS):
+                        additional_seeds = [DEFAULT_RANDOM_SEED + i for i in range(len(EVALUATION_RANDOM_SEEDS), num_trials)]
+                        random_seeds = EVALUATION_RANDOM_SEEDS + additional_seeds
+                    else:
+                        random_seeds = EVALUATION_RANDOM_SEEDS[:num_trials]
+                    
+                    st.caption(f"Random seeds: {random_seeds}")
+                    
+                    # Cost estimate
+                    if shot_counts:
+                        estimated_test_size = len(st.session_state.test_df) if 'test_df' in st.session_state else 300
+                        total_experiments = len(shot_counts) * num_trials
+                        avg_shot_count = sum(shot_counts) / len(shot_counts) if shot_counts else 15
+                        
+                        cost_estimate = estimate_api_cost(
+                            model_name=st.session_state.model_name,
+                            num_test_tweets=estimated_test_size,
+                            num_ablations=total_experiments,
+                            few_shot_examples=int(avg_shot_count)
+                        )
+                        
+                        st.markdown("### Cost Estimate")
+                        st.metric("Estimated Total Cost", f"${cost_estimate['total_cost']:.2f}")
+                        st.caption(f"Total experiments: {total_experiments} ({len(shot_counts)} shot counts × {num_trials} trials)")
+                        
+                        if cost_estimate['total_cost'] > 10:
+                            st.warning(f"Estimated cost exceeds $10. Total: ${cost_estimate['total_cost']:.2f}")
+                    
+                    st.divider()
+                    
+                    st.markdown("### Run Systematic Evaluation")
+                    
+                    if st.button("Start Systematic Evaluation", type="primary"):
+                        if not shot_counts:
+                            st.error("Please select at least one shot count to evaluate.")
+                        elif 'test_df' not in st.session_state:
+                            st.error("Please load the dataset first.")
+                        else:
+                            # Run evaluation
+                            progress_container = st.container()
+                            
+                            with progress_container:
+                                st.info(f"Starting systematic evaluation: {len(shot_counts)} configurations, {num_trials} trials each")
+                                
+                                def progress_callback(current, total, message):
+                                    progress = current / total if total > 0 else 0
+                                    st.progress(progress, text=f"[{current}/{total}] {message}")
+                                
+                                try:
+                                    evaluation_results = run_shot_count_evaluation(
+                                        train_df=st.session_state.train_df,
+                                        test_df=st.session_state.test_df,
+                                        shot_counts=shot_counts,
+                                        num_trials=num_trials,
+                                        api_key=st.session_state.api_key,
+                                        model_name=st.session_state.model_name,
+                                        temperature=st.session_state.temperature,
+                                        max_tokens=st.session_state.max_tokens,
+                                        random_seeds=random_seeds,
+                                        progress_callback=progress_callback
+                                    )
+                                    
+                                    # Store in session state
+                                    st.session_state.evaluation_results = evaluation_results
+                                    
+                                    st.success("Systematic evaluation completed!")
+                                    
+                                    # Display results
+                                    st.markdown("### Results Summary")
+                                    
+                                    # Display aggregated table
+                                    st.dataframe(evaluation_results.aggregated_metrics, width='stretch', hide_index=True)
+                                    
+                                    # Display visualizations
+                                    st.markdown("### Visualizations")
+                                    
+                                    tab1, tab2, tab3 = st.tabs([
+                                        "Performance Trends",
+                                        "Per-Class Trends",
+                                        "Cost vs Performance"
+                                    ])
+                                    
+                                    with tab1:
+                                        st.plotly_chart(
+                                            plot_shot_count_comparison(
+                                                evaluation_results,
+                                                bert_baseline=BERT_BASELINE['f1_macro']
+                                            ),
+                                            width='stretch'
+                                        )
+                                    
+                                    with tab2:
+                                        st.plotly_chart(
+                                            plot_per_class_trends(
+                                                evaluation_results,
+                                                bert_baselines=BERT_BASELINE['per_class']
+                                            ),
+                                            width='stretch'
+                                        )
+                                    
+                                    with tab3:
+                                        st.plotly_chart(
+                                            plot_cost_vs_performance(
+                                                evaluation_results,
+                                                bert_baseline=BERT_BASELINE['f1_macro']
+                                            ),
+                                            width='stretch'
+                                        )
+                                    
+                                    # Export options
+                                    st.markdown("### Export Results")
+                                    
+                                    col1, col2 = st.columns(2)
+                                    
+                                    with col1:
+                                        # Export CSV
+                                        csv_data = evaluation_results.aggregated_metrics.to_csv(index=False)
+                                        st.download_button(
+                                            label="Download Results CSV",
+                                            data=csv_data,
+                                            file_name=f"evaluation_results_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+                                            mime="text/csv"
+                                        )
+                                    
+                                    with col2:
+                                        # Export JSON
+                                        json_data = json.dumps(evaluation_results.to_dict(), indent=2, default=str)
+                                        st.download_button(
+                                            label="Download Results JSON",
+                                            data=json_data,
+                                            file_name=f"evaluation_results_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
+                                            mime="application/json"
+                                        )
+                                    
+                                    # Cost summary
+                                    st.markdown("### Cost Summary")
+                                    st.metric("Total Cost", f"${evaluation_results.total_cost:.4f}")
+                                    st.caption(f"Average cost per configuration: ${evaluation_results.total_cost / (len(shot_counts) * num_trials):.4f}")
+                                    
+                                except Exception as e:
+                                    st.error(f"Evaluation failed: {str(e)}")
+                                    st.exception(e)
+        
+        # Display saved evaluation results if available
+        if 'evaluation_results' in st.session_state:
+            st.markdown("---")
+            st.subheader("Previous Evaluation Results")
+            
+            eval_results = st.session_state.evaluation_results
+            
+            st.dataframe(eval_results.aggregated_metrics, width='stretch', hide_index=True)
+            
+            if st.button("Clear Previous Results"):
+                del st.session_state.evaluation_results
+                st.rerun()
 
 
 if __name__ == "__main__":
