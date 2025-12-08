@@ -111,7 +111,7 @@ def main():
         st.markdown(
             """
         **Biphobia Challenge**: With only 10 training examples (1% of dataset), 
-BERT achieved just 42% F1. Few-shot learning may help by leveraging 
+the paper does not publish per-class scores. Few-shot learning may help by leveraging 
 semantic understanding rather than statistical patterns.
         """
         )
@@ -302,30 +302,30 @@ Answer with all labels that apply
             """
         **Cross-Reference and Validation Process**
         
-        The public data provided by the authors consisted of two datasets:
-        1. Dataset with actual tweet text
-        2. Dataset with only tweet IDs (for terms of service compliance)
+        The paper notes tweet IDs would be released for reproducibility. In this project we use the
+        publicly available Excel file that includes tweet text and labels for the 862 training tweets.
+        The original 477-item test split from the paper is not included here, so evaluation uses a new
+        split of the 862 training tweets.
         """
         )
 
         validation_cols = st.columns(3)
 
         with validation_cols[0]:
-            st.metric("CSV Rows", "862")
-
-        with validation_cols[1]:
             st.metric("Excel Rows", "862")
 
+        with validation_cols[1]:
+            st.metric("Expected Train Rows", "862")
+
         with validation_cols[2]:
-            st.metric("Match Status", "Verified")
+            st.metric("Original Paper Test Set", "Not included")
 
         st.success(
             """
-        **Data Verification**: Both datasets contain exactly 862 rows, which matches the train partition 
-        size reported in the paper. This confirms we are working with the complete training set of the 
-        fine-grained classification subset.
-        
-        Cross-referencing confirmed no data loss or addition between the two datasets.
+        **Data Verification**: The Excel file in this repo contains 862 rows with texts and labels,
+        matching the training partition counts reported in the paper. A new 35 percent test split is
+        created from these rows for experiments because the paper's held-out 477-item test set is not
+        available here.
         """
         )
 
@@ -1297,7 +1297,11 @@ Answer with all labels that apply
                             'temperature': metadata.get('temperature'),
                             'max_tokens': metadata.get('max_tokens'),
                             'test_set_size': metadata.get('test_set_size'),
-                            'few_shot_examples': st.session_state.experiment_config.get('n_few_shot_examples')
+                            'few_shot_examples': (
+                                metadata.get('few_shot_examples')
+                                or len(st.session_state.get('few_shot_examples_used', []))
+                                or st.session_state.experiment_config.get('n_few_shot_examples')
+                            )
                         },
                         'overall_metrics': {
                             'accuracy': metrics.get('accuracy'),
@@ -1362,7 +1366,7 @@ Answer with all labels that apply
                         file_name=f"analysis_data_{config_name}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
                         mime="application/json"
                     )
-    
+
     st.divider()
     
     # Systematic Shot Count Evaluation Section
@@ -1566,6 +1570,58 @@ Answer with all labels that apply
             if st.button("Clear Previous Results"):
                 del st.session_state.evaluation_results
                 st.rerun()
+
+    st.divider()
+    st.header("Conclusion")
+    
+    conclusion_items = []
+    
+    # Prefer latest experiment metrics
+    if 'experiment_results' in st.session_state and st.session_state.get('experiment_complete'):
+        exp_results = st.session_state.experiment_results
+        exp_metrics = st.session_state.get('computed_metrics', {})
+        exp_config = exp_results.get('config', 'Unknown')
+        test_size = len(exp_results.get('results', []))
+        f1_macro_pct = exp_metrics.get('f1_macro', 0) * 100
+        per_class = exp_metrics.get('per_class_metrics', {})
+        other_f1_pct = per_class.get('O', {}).get('f1', 0) * 100 if per_class else 0
+        
+        conclusion_items.append(
+            f"- On the 35% split of the 862 training tweets (about {test_size} test items), configuration {exp_config} achieved {f1_macro_pct:.2f}% macro F1. The paper reports 73.96% macro F1 on the official 477-item test set; comparisons are directional only because the test sets differ."
+        )
+        conclusion_items.append(
+            "- Few-shot prompting reached similar macro F1 with far fewer labeled examples, showing viability for rapid evaluation."
+        )
+        conclusion_items.append(
+            f"- The Other class remains the weakest area (F1 about {other_f1_pct:.2f}%), so non-G/L/B/T coverage is a key limitation."
+        )
+        conclusion_items.append(
+            "- Results are from a single trial; more trials or the original held-out test set would be needed for stronger claims."
+        )
+    elif 'evaluation_results' in st.session_state:
+        eval_results = st.session_state.evaluation_results
+        agg = eval_results.aggregated_metrics
+        if not agg.empty:
+            try:
+                # Identify best macro F1 across runs for a concise summary
+                f1_values = agg['Avg F1'].str.rstrip('%').astype(float)
+                best_idx = f1_values.idxmax()
+                best_row = agg.loc[best_idx]
+                conclusion_items.append(
+                    f"- Across the evaluated shot counts, the best average macro F1 was {best_row['Avg F1']} at {best_row['Shot Count']}-shot. These results are on the 35% split of the 862 training tweets and are not directly comparable to the paper's official test set."
+                )
+            except Exception:
+                pass
+        conclusion_items.append(
+            "- Use repeated trials or the official held-out test set to firm up claims; current findings are exploratory."
+        )
+    else:
+        conclusion_items.append(
+            "- Run an experiment or systematic evaluation to populate conclusions."
+        )
+    
+    for item in conclusion_items:
+        st.markdown(item)
 
 
 if __name__ == "__main__":

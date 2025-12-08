@@ -12,6 +12,8 @@ BERT_BASELINE = {
     'precision_macro': 0.9354,
     'recall_macro': 0.7815,
     'f1_macro': 0.7396,
+    # Paper reports only macro metrics; per-class values below are internal estimates
+    # for comparison and are not taken from the published results.
     'per_class': {
         'G': {'precision': 0.95, 'recall': 0.82, 'f1': 0.88},
         'L': {'precision': 0.85, 'recall': 0.72, 'f1': 0.78},
