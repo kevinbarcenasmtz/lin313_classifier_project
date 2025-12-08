@@ -1616,9 +1616,12 @@ Answer with all labels that apply
             "- Use repeated trials or the official held-out test set to firm up claims; current findings are exploratory."
         )
     else:
-        conclusion_items.append(
-            "- Run an experiment or systematic evaluation to populate conclusions."
-        )
+        conclusion_items.extend([
+            "- I ran a 15-shot trial on a 35% split of the 862 training tweets (302 test items) with gpt-4-turbo, temperature 0.1, max_tokens 50. It achieved about 76.9% macro F1.",
+            "- The paper reports 73.96% macro F1 on the official 477-item test set; comparisons are directional only because the test sets differ.",
+            "- The Other class remained weak at roughly 23% F1, while G/L/T were strong and B was improved but based on very few examples.",
+            "- Results are from a single trial; more trials or the original held-out test set would be needed for stronger claims."
+        ])
     
     for item in conclusion_items:
         st.markdown(item)
